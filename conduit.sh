@@ -12,7 +12,7 @@
 # ║                                                                   ║
 # ║  GitHub: https://github.com/Psiphon-Inc/conduit                   ║
 # ╚═══════════════════════════════════════════════════════════════════╝
-#
+# core engine: https://github.com/Psiphon-Labs/psiphon-tunnel-core
 # Usage:
 # curl -sL https://raw.githubusercontent.com/SamNet-dev/conduit-manager/main/conduit.sh | sudo bash
 #
@@ -703,8 +703,6 @@ show_status() {
     
     if docker ps 2>/dev/null | grep -q "[[:space:]]conduit$"; then
         if [ -n "$stats" ]; then
-            # Already have stats from check below? 
-            # Actually, let's fetch it here with deeper history
             local stats=$(docker logs --tail 1000 conduit 2>&1 | grep "STATS" | tail -1)
         else
              local stats=$(docker logs --tail 1000 conduit 2>&1 | grep "STATS" | tail -1)
