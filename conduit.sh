@@ -211,6 +211,7 @@ check_dependencies() {
             apk) install_package procps ;;
         esac
     fi
+<<<<<<< HEAD
 
     # Check for tput (ncurses)
     if ! command -v tput &>/dev/null; then
@@ -244,6 +245,8 @@ check_dependencies() {
             *) log_warn "Could not install geoiplookup automatically" ;;
         esac
     fi
+=======
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
 }
 
 get_ram_mb() {
@@ -637,12 +640,15 @@ NC='\033[0m'
 MAX_CLIENTS=${MAX_CLIENTS:-200}
 BANDWIDTH=${BANDWIDTH:-5}
 
+<<<<<<< HEAD
 # Ensure we're running as root
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}Error: This command must be run as root (use sudo conduit)${NC}"
     exit 1
 fi
 
+=======
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
 # Check if Docker is available
 check_docker() {
     if ! command -v docker &>/dev/null; then
@@ -854,6 +860,7 @@ show_live_stats() {
     wait $cmd_pid 2>/dev/null
 }
 
+<<<<<<< HEAD
 show_peers() {
     local stop_peers=0
     trap 'stop_peers=1' SIGINT SIGTERM
@@ -961,6 +968,8 @@ show_peers() {
     trap - SIGINT SIGTERM
 }
 
+=======
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
 show_status() {
     local mode="${1:-normal}" # 'live' mode adds line clearing
     local EL=""
@@ -1322,8 +1331,11 @@ show_menu() {
             echo -e "  6. ⏹️  Stop Conduit"
             echo -e "  7. 🔁 Restart Conduit"
             echo ""
+<<<<<<< HEAD
             echo -e "  8. 🌍 View live peers by country (Live Map)"
             echo ""
+=======
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
             echo -e "  u. 🗑️  Uninstall (remove everything)"
             echo -e "  0. 🚪 Exit"
             echo -e "${CYAN}─────────────────────────────────────────────────────────────────${NC}"
@@ -1366,10 +1378,13 @@ show_menu() {
                 read -n 1 -s -r -p "Press any key to return..." < /dev/tty || true
                 redraw=true
                 ;;
+<<<<<<< HEAD
             8)
                 show_peers
                 redraw=true
                 ;;
+=======
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
             u)
                 uninstall_all
                 exit 0
@@ -1383,7 +1398,11 @@ show_menu() {
                 ;;
             *)
                 echo -e "${RED}Invalid choice: ${NC}${YELLOW}$choice${NC}"
+<<<<<<< HEAD
                 echo -e "${CYAN}Choose an option from 0-8, or 'u' to uninstall.${NC}"
+=======
+                echo -e "${CYAN}Choose an option from 0-7, or 'u' to uninstall.${NC}"
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
                 ;;
         esac
     done
@@ -1413,7 +1432,10 @@ case "${1:-menu}" in
     start)    start_conduit ;;
     stop)     stop_conduit ;;
     restart)  restart_conduit ;;
+<<<<<<< HEAD
     peers)    show_peers ;;
+=======
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
     settings) change_settings ;;
     uninstall) uninstall_all ;;
     help|-h|--help) show_help ;;
@@ -1590,9 +1612,12 @@ main() {
     check_root
     detect_os
     
+<<<<<<< HEAD
     # Ensure all tools (including new ones like tcpdump) are present
     check_dependencies
     
+=======
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
     # Check if already installed
     if [ -f "$INSTALL_DIR/conduit" ] && [ "$FORCE_REINSTALL" != "true" ]; then
         echo -e "${GREEN}Conduit is already installed!${NC}"
@@ -1633,6 +1658,12 @@ main() {
         esac
     fi
 
+<<<<<<< HEAD
+=======
+    
+    check_dependencies
+    
+>>>>>>> 265c362fd226cdc9c394c8249e1618ec2770a8ec
     # Interactive settings prompt
     prompt_settings
     
