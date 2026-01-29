@@ -1534,6 +1534,8 @@ process_batch() {
         if [ -z "$country" ]; then
             country=$(geo_lookup "$ip")
         fi
+        # Strip country code prefix (e.g. "US, United States" -> "United States")
+        country=$(echo "$country" | sed 's/^[A-Z][A-Z], //')
         # Normalize
         case "$country" in
             *Iran*) country="Iran - #FreeIran" ;;
