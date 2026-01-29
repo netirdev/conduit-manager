@@ -1488,7 +1488,20 @@ stored_start=""
 [ -f "$C_START_FILE" ] && stored_start=$(cat "$C_START_FILE" 2>/dev/null)
 if [ "$container_start" != "$stored_start" ]; then
     echo "$container_start" > "$C_START_FILE"
-    rm -f "$STATS_FILE" "$IPS_FILE" "$GEOIP_CACHE" "$SNAPSHOT_FILE"
+    # Backup cumulative data before reset
+    if [ -s "$STATS_FILE" ] || [ -s "$IPS_FILE" ]; then
+        echo "[TRACKER] Container restart detected — backing up tracker data"
+        [ -s "$STATS_FILE" ] && cp "$STATS_FILE" "$PERSIST_DIR/cumulative_data.bak"
+        [ -s "$IPS_FILE" ] && cp "$IPS_FILE" "$PERSIST_DIR/cumulative_ips.bak"
+        [ -s "$GEOIP_CACHE" ] && cp "$GEOIP_CACHE" "$PERSIST_DIR/geoip_cache.bak"
+    fi
+    rm -f "$STATS_FILE" "$IPS_FILE" "$SNAPSHOT_FILE"
+    # Restore cumulative data (keep historical totals across restarts)
+    if [ -f "$PERSIST_DIR/cumulative_data.bak" ]; then
+        cp "$PERSIST_DIR/cumulative_data.bak" "$STATS_FILE"
+        cp "$PERSIST_DIR/cumulative_ips.bak" "$IPS_FILE" 2>/dev/null
+        echo "[TRACKER] Tracker data restored from backup"
+    fi
 fi
 touch "$STATS_FILE" "$IPS_FILE"
 
@@ -1584,6 +1597,7 @@ process_batch() {
 }
 
 # Main capture loop: tcpdump -> awk -> batch process
+LAST_BACKUP=0
 while true; do
     BATCH_FILE="$PERSIST_DIR/batch_tmp"
     > "$BATCH_FILE"
@@ -1596,6 +1610,13 @@ while true; do
                 process_batch "$BATCH_FILE"
             fi
             > "$BATCH_FILE"
+            # Periodic backup every 3 hours
+            NOW=$(date +%s)
+            if [ $((NOW - LAST_BACKUP)) -ge 10800 ]; then
+                [ -s "$STATS_FILE" ] && cp "$STATS_FILE" "$PERSIST_DIR/cumulative_data.bak"
+                [ -s "$IPS_FILE" ] && cp "$IPS_FILE" "$PERSIST_DIR/cumulative_ips.bak"
+                LAST_BACKUP=$NOW
+            fi
             continue
         fi
         echo "$line" >> "$BATCH_FILE"
@@ -2522,6 +2543,15 @@ restart_conduit() {
             echo -e "${YELLOW}✓ ${name} removed (scaled down)${NC}"
         fi
     done
+    # Backup tracker data before regenerating
+    local persist_dir="$INSTALL_DIR/traffic_stats"
+    if [ -s "$persist_dir/cumulative_data" ] || [ -s "$persist_dir/cumulative_ips" ]; then
+        echo -e "${CYAN}⟳ Saving tracker data snapshot...${NC}"
+        [ -s "$persist_dir/cumulative_data" ] && cp "$persist_dir/cumulative_data" "$persist_dir/cumulative_data.bak"
+        [ -s "$persist_dir/cumulative_ips" ] && cp "$persist_dir/cumulative_ips" "$persist_dir/cumulative_ips.bak"
+        [ -s "$persist_dir/geoip_cache" ] && cp "$persist_dir/geoip_cache" "$persist_dir/geoip_cache.bak"
+        echo -e "${GREEN}✓ Tracker data snapshot saved${NC}"
+    fi
     # Regenerate tracker script and restart tracker service
     regenerate_tracker_script
     if command -v systemctl &>/dev/null && systemctl is-active --quiet conduit-tracker.service 2>/dev/null; then
@@ -2912,6 +2942,7 @@ manage_containers() {
         echo -e "  ${CYAN}[q]${NC} QR code for container${EL}"
         echo -e "  [b] Back to menu${EL}"
         echo -e "${EL}"
+        echo -e "  ${CYAN}────────────────────────────────────────${NC}${EL}"
         printf "\033[J"
 
         echo -ne "\033[?25h"
@@ -2977,8 +3008,21 @@ manage_containers() {
                 read -n 1 -s -r -p "  Press any key..." < /dev/tty || true
                 ;;
             s)
-                read -p "  Start which container? (1-${CONTAINER_COUNT}): " sc_idx < /dev/tty || true
-                if [[ "$sc_idx" =~ ^[1-5]$ ]] && [ "$sc_idx" -le "$CONTAINER_COUNT" ]; then
+                read -p "  Start which container? (1-${CONTAINER_COUNT}, or 'all'): " sc_idx < /dev/tty || true
+                if [ "$sc_idx" = "all" ]; then
+                    for i in $(seq 1 $CONTAINER_COUNT); do
+                        local name=$(get_container_name $i)
+                        local vol=$(get_volume_name $i)
+                        docker volume create "$vol" 2>/dev/null || true
+                        fix_volume_permissions $i
+                        run_conduit_container $i
+                        if [ $? -eq 0 ]; then
+                            echo -e "  ${GREEN}✓ ${name} started${NC}"
+                        else
+                            echo -e "  ${RED}✗ Failed to start ${name}${NC}"
+                        fi
+                    done
+                elif [[ "$sc_idx" =~ ^[1-5]$ ]] && [ "$sc_idx" -le "$CONTAINER_COUNT" ]; then
                     local name=$(get_container_name $sc_idx)
                     local vol=$(get_volume_name $sc_idx)
                     docker volume create "$vol" 2>/dev/null || true
@@ -2995,8 +3039,14 @@ manage_containers() {
                 read -n 1 -s -r -p "  Press any key..." < /dev/tty || true
                 ;;
             t)
-                read -p "  Stop which container? (1-${CONTAINER_COUNT}): " sc_idx < /dev/tty || true
-                if [[ "$sc_idx" =~ ^[1-5]$ ]] && [ "$sc_idx" -le "$CONTAINER_COUNT" ]; then
+                read -p "  Stop which container? (1-${CONTAINER_COUNT}, or 'all'): " sc_idx < /dev/tty || true
+                if [ "$sc_idx" = "all" ]; then
+                    for i in $(seq 1 $CONTAINER_COUNT); do
+                        local name=$(get_container_name $i)
+                        docker stop "$name" 2>/dev/null || true
+                        echo -e "  ${YELLOW}✓ ${name} stopped${NC}"
+                    done
+                elif [[ "$sc_idx" =~ ^[1-5]$ ]] && [ "$sc_idx" -le "$CONTAINER_COUNT" ]; then
                     local name=$(get_container_name $sc_idx)
                     docker stop "$name" 2>/dev/null || true
                     echo -e "  ${YELLOW}✓ ${name} stopped${NC}"
@@ -3006,8 +3056,26 @@ manage_containers() {
                 read -n 1 -s -r -p "  Press any key..." < /dev/tty || true
                 ;;
             x)
-                read -p "  Restart which container? (1-${CONTAINER_COUNT}): " sc_idx < /dev/tty || true
-                if [[ "$sc_idx" =~ ^[1-5]$ ]] && [ "$sc_idx" -le "$CONTAINER_COUNT" ]; then
+                read -p "  Restart which container? (1-${CONTAINER_COUNT}, or 'all'): " sc_idx < /dev/tty || true
+                if [ "$sc_idx" = "all" ]; then
+                    local persist_dir="$INSTALL_DIR/traffic_stats"
+                    if [ -s "$persist_dir/cumulative_data" ] || [ -s "$persist_dir/cumulative_ips" ]; then
+                        echo -e "  ${CYAN}⟳ Saving tracker data snapshot...${NC}"
+                        [ -s "$persist_dir/cumulative_data" ] && cp "$persist_dir/cumulative_data" "$persist_dir/cumulative_data.bak"
+                        [ -s "$persist_dir/cumulative_ips" ] && cp "$persist_dir/cumulative_ips" "$persist_dir/cumulative_ips.bak"
+                        [ -s "$persist_dir/geoip_cache" ] && cp "$persist_dir/geoip_cache" "$persist_dir/geoip_cache.bak"
+                        echo -e "  ${GREEN}✓ Tracker data snapshot saved${NC}"
+                    fi
+                    for i in $(seq 1 $CONTAINER_COUNT); do
+                        local name=$(get_container_name $i)
+                        docker restart "$name" 2>/dev/null || true
+                        echo -e "  ${GREEN}✓ ${name} restarted${NC}"
+                    done
+                    # Restart tracker to pick up new container state
+                    if command -v systemctl &>/dev/null && systemctl is-active --quiet conduit-tracker.service 2>/dev/null; then
+                        systemctl restart conduit-tracker.service 2>/dev/null || true
+                    fi
+                elif [[ "$sc_idx" =~ ^[1-5]$ ]] && [ "$sc_idx" -le "$CONTAINER_COUNT" ]; then
                     local name=$(get_container_name $sc_idx)
                     docker restart "$name" 2>/dev/null || true
                     echo -e "  ${GREEN}✓ ${name} restarted${NC}"
@@ -3727,12 +3795,13 @@ health_check() {
         fi
 
         echo -n "Network connection:   "
-        local connected=$(docker logs --tail 100 "$cname" 2>&1 | grep -c "Connected to Psiphon" || true)
-        if [ "$connected" -gt 0 ]; then
-            echo -e "${GREEN}OK${NC} (Connected to Psiphon network)"
+        local conn_count=$(docker logs --tail 50 "$cname" 2>&1 | grep "\[STATS\]" | tail -1 | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p')
+        conn_count=${conn_count:-0}
+        if [ "$conn_count" -gt 0 ]; then
+            echo -e "${GREEN}OK${NC} (${conn_count} peers connected)"
         else
-            local info_lines=$(docker logs --tail 100 "$cname" 2>&1 | grep -c "\[INFO\]" || true)
-            if [ "$info_lines" -gt 0 ]; then
+            local stats_exist=$(docker logs --tail 50 "$cname" 2>&1 | grep -c "\[STATS\]" || true)
+            if [ "$stats_exist" -gt 0 ]; then
                 echo -e "${YELLOW}CONNECTING${NC} - Establishing connection..."
             else
                 echo -e "${YELLOW}WAITING${NC} - Starting up..."
