@@ -1161,6 +1161,7 @@ show_dashboard() {
                 local total_upload=0
                 if [ -n "$all_upload" ]; then
                     while IFS='|' read -r bytes co; do
+                        bytes=$(printf '%.0f' "${bytes:-0}" 2>/dev/null) || bytes=0
                         total_upload=$((total_upload + bytes))
                     done <<< "$all_upload"
                 fi
@@ -1169,6 +1170,7 @@ show_dashboard() {
                     while IFS='|' read -r bytes country; do
                         [ -z "$country" ] && continue
                         country="${country%% - #*}"
+                        bytes=$(printf '%.0f' "${bytes:-0}" 2>/dev/null) || bytes=0
                         local pct=$((bytes * 100 / total_upload))
                         local bl=$((pct / 20)); [ "$bl" -lt 1 ] && bl=1; [ "$bl" -gt 5 ] && bl=5
                         local bf=""; local bp=""; for ((bi=0; bi<bl; bi++)); do bf+="█"; done; for ((bi=bl; bi<5; bi++)); do bp+=" "; done
@@ -1844,10 +1846,12 @@ show_advanced_stats() {
             if [ -s "$persist_dir/cumulative_data" ]; then
                 while IFS='|' read -r country from_bytes to_bytes; do
                     [ -z "$country" ] && continue
-                    cbw_in["$country"]=${from_bytes:-0}
-                    cbw_out["$country"]=${to_bytes:-0}
-                    total_in=$((total_in + ${from_bytes:-0}))
-                    total_out=$((total_out + ${to_bytes:-0}))
+                    from_bytes=$(printf '%.0f' "${from_bytes:-0}" 2>/dev/null) || from_bytes=0
+                    to_bytes=$(printf '%.0f' "${to_bytes:-0}" 2>/dev/null) || to_bytes=0
+                    cbw_in["$country"]=$from_bytes
+                    cbw_out["$country"]=$to_bytes
+                    total_in=$((total_in + from_bytes))
+                    total_out=$((total_out + to_bytes))
                 done < "$persist_dir/cumulative_data"
             fi
 
@@ -1990,10 +1994,12 @@ show_peers() {
                 while IFS='|' read -r c f t; do
                     [ -z "$c" ] && continue
                     [[ "$c" == *"can't"* || "$c" == *"error"* ]] && continue
-                    cumul_from["$c"]=${f:-0}
-                    cumul_to["$c"]=${t:-0}
-                    grand_in=$((grand_in + ${f:-0}))
-                    grand_out=$((grand_out + ${t:-0}))
+                    f=$(printf '%.0f' "${f:-0}" 2>/dev/null) || f=0
+                    t=$(printf '%.0f' "${t:-0}" 2>/dev/null) || t=0
+                    cumul_from["$c"]=$f
+                    cumul_to["$c"]=$t
+                    grand_in=$((grand_in + f))
+                    grand_out=$((grand_out + t))
                 done < "$persist_dir/cumulative_data"
             fi
 
@@ -2027,11 +2033,12 @@ show_peers() {
                 while IFS='|' read -r dir c bytes ip; do
                     [ -z "$c" ] && continue
                     [[ "$c" == *"can't"* || "$c" == *"error"* ]] && continue
+                    bytes=$(printf '%.0f' "${bytes:-0}" 2>/dev/null) || bytes=0
                     if [ "$dir" = "FROM" ]; then
-                        snap_from_bytes["$c"]=$(( ${snap_from_bytes["$c"]:-0} + ${bytes:-0} ))
+                        snap_from_bytes["$c"]=$(( ${snap_from_bytes["$c"]:-0} + bytes ))
                         snap_from_ips["$c|$ip"]=1
                     elif [ "$dir" = "TO" ]; then
-                        snap_to_bytes["$c"]=$(( ${snap_to_bytes["$c"]:-0} + ${bytes:-0} ))
+                        snap_to_bytes["$c"]=$(( ${snap_to_bytes["$c"]:-0} + bytes ))
                         snap_to_ips["$c|$ip"]=1
                     fi
                 done < "$persist_dir/tracker_snapshot"
