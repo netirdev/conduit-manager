@@ -2942,11 +2942,11 @@ manage_containers() {
         echo -e "  ${CYAN}[q]${NC} QR code for container${EL}"
         echo -e "  [b] Back to menu${EL}"
         echo -e "${EL}"
-        echo -e "  ${CYAN}────────────────────────────────────────${NC}${EL}"
         printf "\033[J"
 
+        echo -e "  ${CYAN}────────────────────────────────────────${NC}"
         echo -ne "\033[?25h"
-        read -t 5 -p "  Select option: " mc_choice < /dev/tty 2>/dev/null || { mc_choice=""; }
+        read -t 5 -p "  Enter choice: " mc_choice < /dev/tty 2>/dev/null || { mc_choice=""; }
         echo -ne "\033[?25l"
 
         # Empty = just refresh
