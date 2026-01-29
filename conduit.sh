@@ -1529,6 +1529,7 @@ process_batch() {
 
     # Step 2: Single awk pass — merge batch into cumulative_data + write snapshot
     $AWK_BIN -F'|' -v snap="$SNAPSHOT_FILE" '
+        BEGIN { OFMT = "%.0f"; CONVFMT = "%.0f" }
         FILENAME == ARGV[1] { geo[$1] = $2; next }
         FILENAME == ARGV[2] { existing[$1] = $2 "|" $3; next }
         FILENAME == ARGV[3] {
@@ -1597,7 +1598,7 @@ while true; do
         fi
         echo "$line" >> "$BATCH_FILE"
     done < <($TCPDUMP_BIN -tt -l -ni any -n -q "(tcp or udp) and not port 22" 2>/dev/null | $AWK_BIN -v local_ip="$LOCAL_IP" '
-    BEGIN { last_sync = 0 }
+    BEGIN { last_sync = 0; OFMT = "%.0f"; CONVFMT = "%.0f" }
     {
         # Parse timestamp
         ts = $1 + 0
