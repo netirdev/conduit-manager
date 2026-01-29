@@ -84,6 +84,11 @@ conduit health       # Run health check diagnostics
 conduit peers        # Live peer traffic by country (GeoIP)
 ```
 
+### Rewards
+```bash
+conduit qr           # Show QR code to claim rewards via Ryve app
+```
+
 ### Container Management
 ```bash
 conduit start        # Start all Conduit containers
@@ -125,7 +130,7 @@ The interactive menu (`conduit menu`) provides access to all features:
 | **6** | Stop Conduit |
 | **7** | Restart Conduit |
 | **8** | Update Conduit image |
-| **9** | Settings & Tools — max-clients, bandwidth, backup, restore, health check, uninstall |
+| **9** | Settings & Tools — max-clients, bandwidth, QR code, backup, restore, health check, uninstall |
 | **c** | Manage containers — add or remove containers (up to 5) |
 | **a** | Advanced stats — top 5 charts for peers, download, upload, unique IPs |
 | **i** | Info & Help — multi-page guide with tracker, stats, containers, privacy, about |
@@ -183,6 +188,21 @@ Just run the new script. When prompted, select **"Open management menu"** — yo
 5. **Auto-Start Configuration** — Sets up systemd/OpenRC/SysVinit service
 6. **Tracker Service** — Starts background traffic tracker with GeoIP resolution
 7. **CLI Installation** — Creates the `conduit` management command
+
+## Claim Rewards (OAT Tokens)
+
+Conduit node operators can earn OAT tokens for contributing to the Psiphon network. To claim rewards:
+
+1. **Install the Ryve app** on your phone 
+2. **Create a crypto wallet** within the app
+3. **Link your Conduit containers** by scanning the QR code:
+   - From the menu: **Option 6 → Show QR Code & Conduit ID**
+   - From Manage Containers: press **[q]** to display QR code
+   - CLI: `conduit qr`
+4. **Scan the QR code** with the Ryve app to link your node
+5. **Monitor & earn** — the app shows your last 48 hours of connection activity and OAT token rewards
+
+> Each container has its own unique Conduit ID and QR code. If running multiple containers, you'll need to link each one separately.
 
 ## Security
 
@@ -254,6 +274,11 @@ conduit health       # بررسی سلامت سیستم
 conduit peers        # ترافیک بر اساس کشور (GeoIP)
 ```
 
+### پاداش
+```bash
+conduit qr           # نمایش QR کد برای دریافت پاداش از اپلیکیشن Ryve
+```
+
 ### مدیریت کانتینر
 ```bash
 conduit start        # شروع تمام کانتینرها
@@ -293,7 +318,7 @@ conduit help         # راهنما
 | **6** | توقف کاندوییت |
 | **7** | ریستارت کاندوییت |
 | **8** | به‌روزرسانی ایمیج |
-| **9** | تنظیمات و ابزارها — پهنای باند، پشتیبان‌گیری، بازیابی، بررسی سلامت، حذف نصب |
+| **9** | تنظیمات و ابزارها — پهنای باند، QR کد، پشتیبان‌گیری، بازیابی، بررسی سلامت، حذف نصب |
 | **c** | مدیریت کانتینرها — اضافه یا حذف (تا ۵) |
 | **a** | آمار پیشرفته — نمودار برترین کشورها |
 | **i** | راهنما — توضیحات ردیاب، آمار، کانتینرها، حریم خصوصی |
@@ -335,6 +360,21 @@ conduit help         # راهنما
 5. **پیکربندی سرویس** — تنظیم سرویس خودکار (systemd/OpenRC/SysVinit)
 6. **سرویس ردیاب** — شروع ردیاب ترافیک پس‌زمینه
 7. **نصب CLI** — ایجاد دستور مدیریت `conduit`
+
+## دریافت پاداش (توکن OAT)
+
+اپراتورهای نود کاندوییت می‌توانند با مشارکت در شبکه سایفون توکن OAT کسب کنند. مراحل دریافت پاداش:
+
+1. **اپلیکیشن Ryve** را روی گوشی نصب کنید
+2. **یک کیف پول کریپتو** در اپلیکیشن بسازید
+3. **کانتینرهای خود را لینک کنید** با اسکن QR کد:
+   - از منو: **گزینه ۶ ← نمایش QR کد و شناسه کاندوییت**
+   - از مدیریت کانتینرها: کلید **[q]** را بزنید
+   - CLI: `conduit qr`
+4. **QR کد را اسکن کنید** با اپلیکیشن Ryve تا نود شما لینک شود
+5. **مانیتور و کسب درآمد** — اپلیکیشن فعالیت ۴۸ ساعت اخیر و توکن‌های OAT را نمایش می‌دهد
+
+> هر کانتینر شناسه و QR کد منحصر به فرد خود را دارد. اگر چند کانتینر اجرا می‌کنید، باید هر کدام را جداگانه لینک کنید.
 
 ## امنیت
 
