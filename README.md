@@ -38,6 +38,10 @@ sudo bash conduit.sh
 > This list will grow as more features are added before the full v1.2 release.
 
 **New Features**
+- Per-container CPU and memory resource limits via Settings menu
+- Resource limit prompts when adding containers in Container Management
+- Smart defaults based on system specs (CPU cores, RAM)
+- Telegram bot container management commands (`/containers`, `/restart_N`, `/stop_N`, `/start_N`)
 - Telegram bot notifications with guided setup wizard (periodic status reports via Telegram)
 - Systemd-based notification service (survives reboots and TUI exits)
 - Compact number display — large counts show as 16.5K, 1.2M
@@ -45,20 +49,29 @@ sudo bash conduit.sh
 - Total bandwidth served in reports
 - Timestamps on all Telegram reports
 
+**Performance**
+- Parallelized docker commands across all TUI screens (Status, Container Management, Advanced Stats, Live Peers)
+- Batched docker inspect calls instead of per-container
+- Parallel container stop/remove operations
+- Reduced screen refresh time from ~10s to ~2-3s with multiple containers
+
 **Bug Fixes**
 - Auto-restart for stuck containers with improved detection
 - False WAITING status in health check for connected containers without stats
-- Container start/stop/restart logic
+- Container start/stop/restart logic with resource limit change detection
 - Duplicate country entries in GeoIP data with broader name normalization
 - TUI stability (multiple fixes)
 - Health check edge cases
 - CPU normalization in reports (divide by core count)
 - Peers count consistency across views
 - Telegram markdown escaping (backslash handling)
+- Telegram container name mismatch (`conduit2` → `conduit-2`)
 - Wizard failure paths now preserve existing config
 - Uninstall cleanup for Telegram service
 - Menu no longer restarts notification loop on every open
 - PID management for background processes
+- Consistent `[STATS]` grep pattern across all screens
+- Temp dir cleanup to prevent stale data reads
 
 **Security**
 - Silent bot token input (not echoed)
@@ -79,7 +92,8 @@ sudo bash conduit.sh
 - **Live Peer Traffic** — Real-time traffic table by country with speed, total bytes, and IP/client counts
 - **Background Tracker** — Continuous traffic monitoring via systemd service with GeoIP resolution
 - **Telegram Notifications** — Optional periodic status reports and alerts via Telegram bot
-- **Per-Container Settings** — Configure max-clients and bandwidth per container
+- **Per-Container Settings** — Configure max-clients, bandwidth, CPU, and memory per container
+- **Resource Limits** — Set CPU and memory limits with smart defaults based on system specs
 - **Backup & Restore** — Backup and restore your node identity keys
 - **Health Checks** — Comprehensive diagnostics for troubleshooting
 - **Complete Uninstall** — Clean removal of all components including Telegram service
@@ -120,6 +134,8 @@ conduit uninstall    # Remove all components
 |--------|---------|-------|-------------|
 | `max-clients` | 200 | 1–1000 | Max concurrent clients per container |
 | `bandwidth` | 5 | 1–40, -1 | Bandwidth limit per peer (Mbps). -1 for unlimited |
+| `cpu` | Unlimited | 0.1–N cores | CPU limit per container (e.g. 1.0 = one core) |
+| `memory` | Unlimited | 64m–system RAM | Memory limit per container (e.g. 256m, 1g) |
 
 ## Requirements
 
