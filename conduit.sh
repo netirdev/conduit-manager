@@ -2882,6 +2882,10 @@ restart_conduit() {
     fi
     # Regenerate tracker script and ensure service is running
     setup_tracker_service 2>/dev/null || true
+    # Sync systemd service state so dashboard shows "active"
+    if command -v systemctl &>/dev/null && systemctl is-enabled conduit.service &>/dev/null; then
+        systemctl restart conduit.service 2>/dev/null || true
+    fi
 }
 
 change_settings() {
@@ -6550,6 +6554,11 @@ main() {
             if ! create_management_script; then
                 echo -e "${RED}Failed to update management script${NC}"
                 exit 1
+            fi
+            # Fix conduit.service: replace hard docker dependency for snap installs
+            if [ -f /etc/systemd/system/conduit.service ] && grep -q "Requires=docker.service" /etc/systemd/system/conduit.service 2>/dev/null; then
+                sed -i 's/Requires=docker.service/Wants=docker.service/g' /etc/systemd/system/conduit.service
+                systemctl daemon-reload 2>/dev/null || true
             fi
             setup_tracker_service 2>/dev/null || true
             if [ "$TELEGRAM_ENABLED" = "true" ]; then
