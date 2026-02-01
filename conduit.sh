@@ -31,8 +31,8 @@ if [ -z "$BASH_VERSION" ]; then
     exit 1
 fi
 
-VERSION="1.2.1"
-CONDUIT_IMAGE="ghcr.io/ssmirr/conduit/conduit:latest"
+VERSION="1.2"
+CONDUIT_IMAGE="ghcr.io/psiphon-inc/conduit/cli:latest"
 INSTALL_DIR="${INSTALL_DIR:-/opt/conduit}"
 BACKUP_DIR="$INSTALL_DIR/backups"
 FORCE_REINSTALL=false
@@ -870,7 +870,7 @@ create_management_script() {
 VERSION="1.2.1"
 INSTALL_DIR="REPLACE_ME_INSTALL_DIR"
 BACKUP_DIR="$INSTALL_DIR/backups"
-CONDUIT_IMAGE="ghcr.io/ssmirr/conduit/conduit:latest"
+CONDUIT_IMAGE="ghcr.io/psiphon-inc/conduit/cli:latest"
 
 # Colors
 RED='\033[0;31m'
