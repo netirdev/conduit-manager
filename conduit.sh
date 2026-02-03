@@ -1821,7 +1821,7 @@ while true; do
                 break
             fi
         fi
-    done < <($TCPDUMP_BIN -tt -l -ni any -n -q "(tcp or udp) and not port 22" 2>/dev/null | $AWK_BIN -v local_ip="$LOCAL_IP" '
+    done < <($TCPDUMP_BIN -tt -l -ni any -n -q -s 96 "(tcp or udp) and not port 22" 2>/dev/null | $AWK_BIN -v local_ip="$LOCAL_IP" '
     BEGIN { last_sync = 0; OFMT = "%.0f"; CONVFMT = "%.0f" }
     {
         # Parse timestamp
@@ -1867,9 +1867,9 @@ while true; do
             to[dst] += len
         }
 
-        # Sync every 15 seconds
+        # Sync every 30 seconds
         if (last_sync == 0) last_sync = ts
-        if (ts - last_sync >= 15) {
+        if (ts - last_sync >= 30) {
             for (ip in from) { if (from[ip] > 0) print "FROM|" ip "|" from[ip] }
             for (ip in to) { if (to[ip] > 0) print "TO|" ip "|" to[ip] }
             print "SYNC_MARKER"
