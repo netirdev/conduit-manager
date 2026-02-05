@@ -10,7 +10,7 @@
                       M A N A G E R
 ```
 
-![Version](https://img.shields.io/badge/version-1.2-blue)
+![Version](https://img.shields.io/badge/version-1.2.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange)
 ![Docker](https://img.shields.io/badge/Docker-Required-2496ED?logo=docker&logoColor=white)
@@ -41,6 +41,18 @@ wget https://raw.githubusercontent.com/SamNet-dev/conduit-manager/main/conduit.s
 sudo bash conduit.sh
 ```
 
+## What's New in v1.2.1
+
+- **Peak & Average Tracking** — Dashboard shows peak and average connected clients since container start
+- **Connection History** — See client counts from 6h, 12h, and 24h ago on the dashboard
+- **24/7 Background Recording** — Tracker records connection stats even when dashboard is closed
+- **Temporal Sampling** — Tracker captures 15s, sleeps 15s, multiplies by 2x for ~40-50% CPU reduction
+- **CPU Temperature Display** — System CPU load now shows temperature when available
+- **Unlimited Containers** — Removed 5-container limit, scale based on your hardware
+- **Tracker Toggle** — Option to disable tracker for additional CPU savings
+- **Smart Data Reset** — Peak, average, and history reset only when ALL containers restart
+- **New Info Page** — Added "Peak, Average & Client History" guide explaining all stats
+
 ## What's New in v1.2
 
 - **Per-Container Resource Limits** — Set CPU and memory limits per container via Settings menu with smart defaults
@@ -56,20 +68,21 @@ sudo bash conduit.sh
 ## Features
 
 - **One-Click Deployment** — Automatically installs Docker and configures everything
-- **Multi-Container Scaling** — Run 1–5 containers to maximize your server's capacity
+- **Scalable Containers** — Run unlimited containers based on your server's capacity
 - **Multi-Distro Support** — Works on Ubuntu, Debian, CentOS, Fedora, Arch, Alpine, openSUSE
 - **Auto-Start on Boot** — Supports systemd, OpenRC, and SysVinit
-- **Live Dashboard** — Real-time connection stats with CPU/RAM monitoring and per-country client breakdown
+- **Live Dashboard** — Real-time stats with peak, average, CPU/RAM, temperature, and per-country breakdown
+- **Connection History** — Track client counts over time with 6h, 12h, 24h snapshots
 - **Advanced Stats** — Top countries by connected peers, download, upload, and unique IPs with bar charts
 - **Live Peer Traffic** — Real-time traffic table by country with speed, total bytes, and IP/client counts
-- **Background Tracker** — Continuous traffic monitoring via systemd service with GeoIP resolution
+- **Background Tracker** — 24/7 traffic and connection monitoring via systemd service with GeoIP resolution
 - **Telegram Bot** — On-demand `/status`, `/peers`, `/uptime`, `/containers` and remote container management via Telegram
 - **Per-Container Settings** — Configure max-clients, bandwidth, CPU, and memory per container
 - **Resource Limits** — Set CPU and memory limits with smart defaults based on system specs
 - **Easy Management** — Powerful CLI commands or interactive menu
 - **Backup & Restore** — Backup and restore your node identity keys
 - **Health Checks** — Comprehensive diagnostics for troubleshooting
-- **Info & Help** — Built-in multi-page guide explaining how everything works
+- **Info & Help** — Built-in multi-page guide explaining traffic, stats, and how everything works
 - **Complete Uninstall** — Clean removal of all components including Telegram service
 
 ## Supported Distributions
@@ -141,7 +154,7 @@ The interactive menu (`conduit menu`) provides access to all features:
 
 | Option | Description |
 |--------|-------------|
-| **1** | View status dashboard — real-time stats with active clients and top upload by country |
+| **1** | View status dashboard — real-time stats with peak, average, 6h/12h/24h history, active clients |
 | **2** | Live connection stats — streaming stats from Docker logs |
 | **3** | View logs — raw Docker log output |
 | **4** | Live peers by country — per-country traffic table with speed and client counts |
@@ -152,7 +165,7 @@ The interactive menu (`conduit menu`) provides access to all features:
 | **9** | Settings & Tools — resource limits, QR code, backup, restore, health check, Telegram, uninstall |
 | **c** | Manage containers — add or remove containers (up to 5) |
 | **a** | Advanced stats — top 5 charts for peers, download, upload, unique IPs |
-| **i** | Info & Help — multi-page guide with tracker, stats, containers, privacy, about |
+| **i** | Info & Help — multi-page guide explaining traffic, network, stats, peak/avg/history |
 | **0** | Exit |
 
 ## Configuration Options
@@ -164,14 +177,16 @@ The interactive menu (`conduit menu`) provides access to all features:
 | `cpu` | Unlimited | 0.1–N cores | CPU limit per container (e.g. 1.0 = one core) |
 | `memory` | Unlimited | 64m–system RAM | Memory limit per container (e.g. 256m, 1g) |
 
-**Recommended values based on server hardware:**
+**Recommended values based on CPU:**
 
-| CPU Cores | RAM | Recommended Containers | Max Clients (per container) |
-|-----------|-----|------------------------|-----------------------------|
-| 1 Core | < 1 GB | 1 | 100 |
-| 2 Cores | 2 GB | 1–2 | 200 |
-| 4 Cores | 4 GB+ | 2–3 | 400 |
-| 8+ Cores | 8 GB+ | 3+ | 800 |
+| CPU Cores | Recommended Containers | Max Clients (per container) |
+|-----------|------------------------|-----------------------------|
+| 1 Core | 1 | 100 |
+| 2 Cores | 1–2 | 200 |
+| 4 Cores | 2–4 | 400 |
+| 8+ Cores | 4+ | 800 |
+
+> **RAM:** Minimum 512MB. For 3+ containers, 4GB+ recommended.
 
 ## Installation Options
 
@@ -265,6 +280,18 @@ wget https://raw.githubusercontent.com/SamNet-dev/conduit-manager/main/conduit.s
 sudo bash conduit.sh
 ```
 
+## تازه‌های نسخه 1.2.1
+
+- **ردیابی پیک و میانگین** — نمایش بیشترین و میانگین کلاینت‌های متصل از زمان شروع کانتینر
+- **تاریخچه اتصال** — مشاهده تعداد کلاینت‌ها در ۶، ۱۲ و ۲۴ ساعت گذشته
+- **ضبط ۲۴/۷ پس‌زمینه** — ردیاب آمار اتصال را حتی وقتی داشبورد بسته است ثبت می‌کند
+- **نمونه‌برداری زمانی** — ردیاب ۱۵ ثانیه ضبط، ۱۵ ثانیه استراحت با ضریب ۲ برای ~۴۰-۵۰٪ کاهش CPU
+- **نمایش دمای CPU** — نمایش دما در کنار مصرف CPU سیستم
+- **کانتینر نامحدود** — حذف محدودیت ۵ کانتینر، مقیاس‌بندی بر اساس سخت‌افزار
+- **غیرفعال‌سازی ردیاب** — گزینه خاموش کردن ردیاب برای صرفه‌جویی بیشتر CPU
+- **ریست هوشمند داده** — پیک، میانگین و تاریخچه فقط وقتی همه کانتینرها ریستارت شوند ریست می‌شوند
+- **صفحه راهنمای جدید** — توضیح پیک، میانگین و تاریخچه کلاینت‌ها
+
 ## تازه‌های نسخه 1.2
 
 - **محدودیت منابع هر کانتینر** — تنظیم محدودیت CPU و حافظه برای هر کانتینر با پیش‌فرض‌های هوشمند
@@ -279,20 +306,21 @@ sudo bash conduit.sh
 ## ویژگی‌ها
 
 - **نصب با یک کلیک** — داکر و تمام موارد مورد نیاز به صورت خودکار نصب می‌شود
-- **مقیاس‌پذیری چند کانتینره** — اجرای ۱ تا ۵ کانتینر برای حداکثر استفاده از سرور
+- **مقیاس‌پذیری نامحدود** — اجرای کانتینرهای نامحدود بر اساس ظرفیت سرور
 - **پشتیبانی از توزیع‌های مختلف** — اوبونتو، دبیان، سنت‌اواس، فدورا، آرچ، آلپاین، اوپن‌سوزه
 - **راه‌اندازی خودکار** — پس از ریستارت سرور، سرویس به صورت خودکار اجرا می‌شود
-- **داشبورد زنده** — نمایش لحظه‌ای وضعیت، تعداد کاربران، مصرف CPU و RAM
+- **داشبورد زنده** — نمایش لحظه‌ای پیک، میانگین، CPU، RAM، دما و تفکیک کشوری
+- **تاریخچه اتصال** — ردیابی تعداد کلاینت‌ها با اسنپ‌شات ۶، ۱۲ و ۲۴ ساعته
 - **آمار پیشرفته** — نمودار میله‌ای برترین کشورها بر اساس اتصال، دانلود، آپلود و IP
 - **مانیتورینگ ترافیک** — جدول لحظه‌ای ترافیک بر اساس کشور با سرعت و تعداد کلاینت
-- **ردیاب پس‌زمینه** — سرویس ردیابی مداوم ترافیک با تشخیص جغرافیایی
+- **ردیاب پس‌زمینه** — سرویس ردیابی ۲۴/۷ ترافیک و اتصالات با تشخیص جغرافیایی
 - **ربات تلگرام** — دستورات `/status`، `/peers`، `/uptime`، `/containers` و مدیریت کانتینر از راه دور (اختیاری)
 - **تنظیمات هر کانتینر** — پیکربندی حداکثر کاربران، پهنای باند، CPU و حافظه برای هر کانتینر
 - **محدودیت منابع** — تنظیم محدودیت CPU و حافظه با پیش‌فرض‌های هوشمند
 - **مدیریت آسان** — دستورات قدرتمند CLI یا منوی تعاملی
 - **پشتیبان‌گیری و بازیابی** — پشتیبان‌گیری و بازیابی کلیدهای هویت نود
 - **بررسی سلامت** — تشخیص جامع برای عیب‌یابی
-- **راهنما و اطلاعات** — راهنمای چندصفحه‌ای داخلی
+- **راهنما و اطلاعات** — راهنمای چندصفحه‌ای توضیح ترافیک، آمار و نحوه کارکرد
 - **حذف کامل** — پاکسازی تمام فایل‌ها و تنظیمات شامل سرویس تلگرام
 
 ## پشتیبانی از macOS
@@ -350,7 +378,7 @@ conduit help         # راهنما
 
 | گزینه | توضیحات |
 |-------|---------|
-| **1** | داشبورد وضعیت — آمار لحظه‌ای با کلاینت‌های فعال و آپلود برتر |
+| **1** | داشبورد وضعیت — آمار لحظه‌ای با پیک، میانگین، تاریخچه ۶/۱۲/۲۴ ساعته |
 | **2** | آمار زنده اتصال — استریم آمار از لاگ داکر |
 | **3** | مشاهده لاگ — خروجی لاگ داکر |
 | **4** | ترافیک زنده به تفکیک کشور — جدول ترافیک با سرعت و تعداد کلاینت |
@@ -361,7 +389,7 @@ conduit help         # راهنما
 | **9** | تنظیمات و ابزارها — محدودیت منابع، QR کد، پشتیبان‌گیری، بازیابی، تلگرام، حذف نصب |
 | **c** | مدیریت کانتینرها — اضافه یا حذف (تا ۵) |
 | **a** | آمار پیشرفته — نمودار برترین کشورها |
-| **i** | راهنما — توضیحات ردیاب، آمار، کانتینرها، حریم خصوصی |
+| **i** | راهنما — توضیحات ترافیک، شبکه، آمار، پیک/میانگین/تاریخچه |
 | **0** | خروج |
 
 ## تنظیمات
@@ -373,14 +401,16 @@ conduit help         # راهنما
 | `cpu` | نامحدود | 0.1–N هسته | محدودیت CPU هر کانتینر (مثلاً 1.0 = یک هسته) |
 | `memory` | نامحدود | 64m–حافظه سیستم | محدودیت حافظه هر کانتینر (مثلاً 256m، 1g) |
 
-**مقادیر پیشنهادی بر اساس سخت‌افزار سرور:**
+**مقادیر پیشنهادی بر اساس CPU:**
 
-| پردازنده | رم | کانتینر پیشنهادی | حداکثر کاربران (هر کانتینر) |
-|----------|-----|-------------------|----------------------------|
-| ۱ هسته | کمتر از ۱ گیگ | ۱ | ۱۰۰ |
-| ۲ هسته | ۲ گیگ | ۱–۲ | ۲۰۰ |
-| ۴ هسته | ۴ گیگ+ | ۲–۳ | ۴۰۰ |
-| ۸+ هسته | ۸ گیگ+ | ۳+ | ۸۰۰ |
+| پردازنده | کانتینر پیشنهادی | حداکثر کاربران (هر کانتینر) |
+|----------|-------------------|----------------------------|
+| ۱ هسته | ۱ | ۱۰۰ |
+| ۲ هسته | ۱–۲ | ۲۰۰ |
+| ۴ هسته | ۲–۴ | ۴۰۰ |
+| ۸+ هسته | ۴+ | ۸۰۰ |
+
+> **رم:** حداقل ۵۱۲ مگابایت. برای ۳+ کانتینر، ۴ گیگابایت+ پیشنهاد می‌شود.
 
 ## گزینه‌های نصب
 

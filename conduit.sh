@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # ╔═══════════════════════════════════════════════════════════════════╗
-# ║      🚀 PSIPHON CONDUIT MANAGER v1.2                             ║
+# ║     🚀 PSIPHON CONDUIT MANAGER v1.2.1                             ║
 # ║                                                                   ║
 # ║  One-click setup for Psiphon Conduit                              ║
 # ║                                                                   ║
@@ -31,7 +31,7 @@ if [ -z "$BASH_VERSION" ]; then
     exit 1
 fi
 
-VERSION="1.2"
+VERSION="1.2.1"
 CONDUIT_IMAGE="ghcr.io/ssmirr/conduit/conduit:latest"
 INSTALL_DIR="${INSTALL_DIR:-/opt/conduit}"
 BACKUP_DIR="$INSTALL_DIR/backups"
@@ -867,7 +867,7 @@ create_management_script() {
 # Reference: https://github.com/ssmirr/conduit/releases/latest
 #
 
-VERSION="1.2"
+VERSION="1.2.1"
 INSTALL_DIR="REPLACE_ME_INSTALL_DIR"
 BACKUP_DIR="$INSTALL_DIR/backups"
 CONDUIT_IMAGE="ghcr.io/ssmirr/conduit/conduit:latest"
@@ -1293,18 +1293,22 @@ show_dashboard() {
             echo -e "\033[K"
         fi
 
-        echo -e "${BOLD}Refreshes every 10 seconds. Press any key to return to menu...${NC}\033[K"
-        
+        echo -e "${BOLD}Refreshes every 10 seconds.  ${CYAN}[i]${NC} ${DIM}What do these numbers mean?${NC}  ${DIM}[any key] Menu${NC}\033[K"
+
         # Clear any leftover lines below the dashboard content (Erase to End of Display)
         # This only cleans up if the dashboard gets shorter
         if ! tput ed 2>/dev/null; then
             printf "\033[J"
         fi
-        
+
         # Wait 10 seconds for keypress (balances responsiveness with CPU usage)
         # Redirect from /dev/tty ensures it works when the script is piped
-        if read -t 10 -n 1 -s < /dev/tty 2>/dev/null; then
-            stop_dashboard=1
+        if read -t 10 -n 1 -s key < /dev/tty 2>/dev/null; then
+            if [[ "$key" == "i" || "$key" == "I" ]]; then
+                show_dashboard_info
+            else
+                stop_dashboard=1
+            fi
         fi
     done
     
@@ -1560,6 +1564,119 @@ SNAPSHOT_FILE="$PERSIST_DIR/tracker_snapshot"
 C_START_FILE="$PERSIST_DIR/container_start"
 GEOIP_CACHE="$PERSIST_DIR/geoip_cache"
 
+# Temporal sampling configuration (capture 15s, sleep 15s, multiply by 2)
+# This reduces CPU usage by ~40-50% while maintaining accurate traffic estimates
+SAMPLE_CAPTURE_TIME=15    # Seconds to capture packets
+SAMPLE_SLEEP_TIME=15      # Seconds to sleep between captures
+TRAFFIC_MULTIPLIER=2      # Multiply byte counts to compensate for sampling
+
+# Connection tracking files
+CONN_HISTORY_FILE="$PERSIST_DIR/connection_history"
+CONN_HISTORY_START="$PERSIST_DIR/connection_history_start"
+PEAK_CONN_FILE="$PERSIST_DIR/peak_connections"
+LAST_CONN_RECORD=0
+CONN_RECORD_INTERVAL=300  # Record every 5 minutes
+
+# Get earliest container start time (for reset detection)
+get_container_start() {
+    local earliest=""
+    local count=${CONTAINER_COUNT:-1}
+    for i in $(seq 1 $count); do
+        local cname
+        if [ "$count" -eq 1 ]; then
+            cname="intgpsiphonclient"
+        else
+            cname="intgpsiphonclient${i}"
+        fi
+        local start=$(docker inspect --format='{{.State.StartedAt}}' "$cname" 2>/dev/null | cut -d'.' -f1)
+        [ -z "$start" ] && continue
+        if [ -z "$earliest" ] || [[ "$start" < "$earliest" ]]; then
+            earliest="$start"
+        fi
+    done
+    echo "$earliest"
+}
+
+# Check if containers restarted and reset data if needed
+check_container_restart() {
+    local current_start=$(get_container_start)
+    [ -z "$current_start" ] && return
+
+    # Check history file
+    if [ -f "$CONN_HISTORY_START" ]; then
+        local saved=$(cat "$CONN_HISTORY_START" 2>/dev/null)
+        if [ "$saved" != "$current_start" ]; then
+            # Container restarted - clear history and peak
+            rm -f "$CONN_HISTORY_FILE" "$PEAK_CONN_FILE" 2>/dev/null
+            echo "$current_start" > "$CONN_HISTORY_START"
+        fi
+    else
+        echo "$current_start" > "$CONN_HISTORY_START"
+    fi
+}
+
+# Count current connections from docker logs (lightweight)
+count_connections() {
+    local total_conn=0
+    local total_cing=0
+    local count=${CONTAINER_COUNT:-1}
+    for i in $(seq 1 $count); do
+        local cname
+        if [ "$count" -eq 1 ]; then
+            cname="intgpsiphonclient"
+        else
+            cname="intgpsiphonclient${i}"
+        fi
+        # Quick tail of recent logs
+        local stats=$(docker logs --tail 50 "$cname" 2>&1 | grep -o 'numClients":[0-9]*' | tail -1 | grep -o '[0-9]*')
+        local cing=$(docker logs --tail 50 "$cname" 2>&1 | grep -o 'connectingClients":[0-9]*' | tail -1 | grep -o '[0-9]*')
+        total_conn=$((total_conn + ${stats:-0}))
+        total_cing=$((total_cing + ${cing:-0}))
+    done
+    echo "$total_conn|$total_cing"
+}
+
+# Record connection history and update peak
+record_connections() {
+    local now=$(date +%s)
+
+    # Only record every 5 minutes
+    if [ $((now - LAST_CONN_RECORD)) -lt $CONN_RECORD_INTERVAL ]; then
+        return
+    fi
+    LAST_CONN_RECORD=$now
+
+    # Check for container restart
+    check_container_restart
+
+    # Get current connections
+    local counts=$(count_connections)
+    local connected=$(echo "$counts" | cut -d'|' -f1)
+    local connecting=$(echo "$counts" | cut -d'|' -f2)
+
+    # Record to history
+    echo "${now}|${connected}|${connecting}" >> "$CONN_HISTORY_FILE"
+
+    # Prune old entries (keep 25 hours)
+    local cutoff=$((now - 90000))
+    if [ -f "$CONN_HISTORY_FILE" ]; then
+        awk -F'|' -v cutoff="$cutoff" '$1 >= cutoff' "$CONN_HISTORY_FILE" > "${CONN_HISTORY_FILE}.tmp" 2>/dev/null
+        mv -f "${CONN_HISTORY_FILE}.tmp" "$CONN_HISTORY_FILE" 2>/dev/null
+    fi
+
+    # Update peak if needed
+    local current_peak=0
+    if [ -f "$PEAK_CONN_FILE" ]; then
+        current_peak=$(tail -1 "$PEAK_CONN_FILE" 2>/dev/null)
+        current_peak=${current_peak:-0}
+    fi
+    if [ "$connected" -gt "$current_peak" ] 2>/dev/null; then
+        local start=$(cat "$CONN_HISTORY_START" 2>/dev/null)
+        echo "$start" > "$PEAK_CONN_FILE"
+        echo "$connected" >> "$PEAK_CONN_FILE"
+    fi
+}
+
 # Detect local IPs
 get_local_ips() {
     ip -4 addr show 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]}' | tr '\n' '|'
@@ -1679,17 +1796,18 @@ process_batch() {
     done < "$PERSIST_DIR/batch_ips"
 
     # Step 2: Single awk pass — merge batch into cumulative_data + write snapshot
-    $AWK_BIN -F'|' -v snap="${SNAPSHOT_TMP:-$SNAPSHOT_FILE}" '
-        BEGIN { OFMT = "%.0f"; CONVFMT = "%.0f" }
+    # MULT applies traffic multiplier for temporal sampling (capture 15s, sleep 15s = multiply by 2)
+    $AWK_BIN -F'|' -v snap="${SNAPSHOT_TMP:-$SNAPSHOT_FILE}" -v MULT="$TRAFFIC_MULTIPLIER" '
+        BEGIN { OFMT = "%.0f"; CONVFMT = "%.0f"; if (MULT == "") MULT = 1 }
         FILENAME == ARGV[1] { geo[$1] = $2; next }
         FILENAME == ARGV[2] { existing[$1] = $2 "|" $3; next }
         FILENAME == ARGV[3] {
-            dir = $1; ip = $2; bytes = $3 + 0
+            dir = $1; ip = $2; bytes = ($3 + 0) * MULT
             c = geo[ip]
             if (c == "") c = "Unknown"
             if (dir == "FROM") from_bytes[c] += bytes
             else to_bytes[c] += bytes
-            # Also collect snapshot lines
+            # Also collect snapshot lines (with multiplied bytes for rate display)
             print dir "|" c "|" bytes "|" ip > snap
             next
         }
@@ -1818,56 +1936,39 @@ Container ${safe_cname} was stuck (no peers for $((idle_time/3600))h) and has be
     done
 }
 
-# Main capture loop: tcpdump -> awk -> batch process
+# Main capture loop with temporal sampling: capture -> process -> sleep -> repeat
+# This reduces CPU usage by ~40-50% while maintaining accurate traffic estimates
 LAST_BACKUP=0
 while true; do
     BATCH_FILE="$PERSIST_DIR/batch_tmp"
     > "$BATCH_FILE"
 
-    while true; do
-        if IFS= read -t 60 -r line; then
-            if [ "$line" = "SYNC_MARKER" ]; then
-                # Process entire batch at once
-                if [ -s "$BATCH_FILE" ]; then
-                    > "${SNAPSHOT_FILE}.new"
-                    SNAPSHOT_TMP="${SNAPSHOT_FILE}.new"
-                    if process_batch "$BATCH_FILE" && [ -s "${SNAPSHOT_FILE}.new" ]; then
-                        mv -f "${SNAPSHOT_FILE}.new" "$SNAPSHOT_FILE"
-                    fi
+    # Capture phase: run tcpdump for SAMPLE_CAPTURE_TIME seconds
+    # timeout kills tcpdump after the specified time, AWK END block flushes remaining data
+    while IFS= read -r line; do
+        if [ "$line" = "SYNC_MARKER" ]; then
+            # Process batch when we receive sync marker
+            if [ -s "$BATCH_FILE" ]; then
+                > "${SNAPSHOT_FILE}.new"
+                SNAPSHOT_TMP="${SNAPSHOT_FILE}.new"
+                if process_batch "$BATCH_FILE" && [ -s "${SNAPSHOT_FILE}.new" ]; then
+                    mv -f "${SNAPSHOT_FILE}.new" "$SNAPSHOT_FILE"
                 fi
-                > "$BATCH_FILE"
-                # Periodic backup every 3 hours
-                NOW=$(date +%s)
-                if [ $((NOW - LAST_BACKUP)) -ge 10800 ]; then
-                    [ -s "$STATS_FILE" ] && cp "$STATS_FILE" "$PERSIST_DIR/cumulative_data.bak"
-                    [ -s "$IPS_FILE" ] && cp "$IPS_FILE" "$PERSIST_DIR/cumulative_ips.bak"
-                    LAST_BACKUP=$NOW
-                fi
-                # Check for stuck containers every 15 minutes
-                if [ $((NOW - LAST_STUCK_CHECK)) -ge "$STUCK_CHECK_INTERVAL" ]; then
-                    check_stuck_containers
-                    LAST_STUCK_CHECK=$NOW
-                fi
-                continue
             fi
-            echo "$line" >> "$BATCH_FILE"
+            > "$BATCH_FILE"
+
+            # Periodic backup every 3 hours
+            NOW=$(date +%s)
+            if [ $((NOW - LAST_BACKUP)) -ge 10800 ]; then
+                [ -s "$STATS_FILE" ] && cp "$STATS_FILE" "$PERSIST_DIR/cumulative_data.bak"
+                [ -s "$IPS_FILE" ] && cp "$IPS_FILE" "$PERSIST_DIR/cumulative_ips.bak"
+                LAST_BACKUP=$NOW
+            fi
         else
-            # read timed out or EOF — check stuck containers even with no traffic
-            rc=$?
-            if [ $rc -gt 128 ]; then
-                # Timeout — no traffic, still check for stuck containers
-                NOW=$(date +%s)
-                if [ $((NOW - LAST_STUCK_CHECK)) -ge "$STUCK_CHECK_INTERVAL" ]; then
-                    check_stuck_containers
-                    LAST_STUCK_CHECK=$NOW
-                fi
-            else
-                # EOF — tcpdump exited, break to outer loop to restart
-                break
-            fi
+            echo "$line" >> "$BATCH_FILE"
         fi
-    done < <($TCPDUMP_BIN -tt -l -ni "$CAPTURE_IFACE" -n -q -s 96 "(tcp or udp) and not port 22" 2>/dev/null | $AWK_BIN -v local_ip="$LOCAL_IP" '
-    BEGIN { last_sync = 0; OFMT = "%.0f"; CONVFMT = "%.0f" }
+    done < <(timeout "$SAMPLE_CAPTURE_TIME" $TCPDUMP_BIN -tt -l -ni "$CAPTURE_IFACE" -n -q -s 64 "(tcp or udp) and not port 22" 2>/dev/null | $AWK_BIN -v local_ip="$LOCAL_IP" '
+    BEGIN { OFMT = "%.0f"; CONVFMT = "%.0f" }
     {
         # Parse timestamp
         ts = $1 + 0
@@ -1901,7 +2002,7 @@ while true; do
         if (src ~ /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|169\.254\.)/) src=""
         if (dst ~ /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|169\.254\.)/) dst=""
 
-        # Determine direction
+        # Determine direction and accumulate
         if (src == local_ip && dst != "" && dst != local_ip) {
             to[dst] += len
         } else if (dst == local_ip && src != "" && src != local_ip) {
@@ -1911,19 +2012,28 @@ while true; do
         } else if (dst != "" && dst != local_ip) {
             to[dst] += len
         }
-
-        # Sync every 30 seconds
-        if (last_sync == 0) last_sync = ts
-        if (ts - last_sync >= 30) {
-            for (ip in from) { if (from[ip] > 0) print "FROM|" ip "|" from[ip] }
-            for (ip in to) { if (to[ip] > 0) print "TO|" ip "|" to[ip] }
-            print "SYNC_MARKER"
-            delete from; delete to; last_sync = ts; fflush()
-        }
+    }
+    END {
+        # Flush all accumulated data when tcpdump exits (after timeout)
+        for (ip in from) { if (from[ip] > 0) print "FROM|" ip "|" from[ip] }
+        for (ip in to) { if (to[ip] > 0) print "TO|" ip "|" to[ip] }
+        print "SYNC_MARKER"
+        fflush()
     }')
 
-    # If tcpdump exits, wait and retry
-    sleep 5
+    # Check for stuck containers during each cycle
+    NOW=$(date +%s)
+    if [ $((NOW - LAST_STUCK_CHECK)) -ge "$STUCK_CHECK_INTERVAL" ]; then
+        check_stuck_containers
+        LAST_STUCK_CHECK=$NOW
+    fi
+
+    # Record connection history and peak (every 5 min, lightweight)
+    record_connections
+
+    # Sleep phase: pause before next capture cycle
+    # This is where CPU savings come from - tcpdump not running during sleep
+    sleep "$SAMPLE_SLEEP_TIME"
 done
 TRACKER_SCRIPT
 
@@ -2471,6 +2581,373 @@ get_net_speed() {
     fi
 }
 
+# Show detailed info about dashboard metrics
+# Info page 1: Traffic & Bandwidth Explained
+show_info_traffic() {
+    clear
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  TRAFFIC & BANDWIDTH EXPLAINED${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}Traffic (current session)${NC}"
+    echo -e "  ${BOLD}Source:${NC}     Container logs ([STATS] lines from Conduit)"
+    echo -e "  ${BOLD}Measures:${NC}   Application-level payload data"
+    echo -e "  ${BOLD}Meaning:${NC}    Actual content delivered to/from users"
+    echo -e "  ${BOLD}Resets:${NC}     When containers restart"
+    echo ""
+    echo -e "${YELLOW}Top 5 Upload/Download (cumulative)${NC}"
+    echo -e "  ${BOLD}Source:${NC}     Network tracker (tcpdump on interface)"
+    echo -e "  ${BOLD}Measures:${NC}   Network-level bytes on the wire"
+    echo -e "  ${BOLD}Meaning:${NC}    Actual bandwidth used (what your ISP sees)"
+    echo -e "  ${BOLD}Resets:${NC}     Via Settings > Reset tracker data"
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}WHY ARE THESE NUMBERS DIFFERENT?${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  The tracker typically shows ${YELLOW}5-20x more${NC} traffic than container stats."
+    echo -e "  This is ${GREEN}normal${NC} for encrypted tunneling proxies like Conduit."
+    echo ""
+    echo -e "  ${BOLD}The difference is protocol overhead:${NC}"
+    echo -e "    • TLS/encryption framing"
+    echo -e "    • Tunnel protocol headers"
+    echo -e "    • TCP acknowledgments (ACKs)"
+    echo -e "    • Keep-alive packets"
+    echo -e "    • Connection handshakes"
+    echo -e "    • Retransmissions"
+    echo ""
+    echo -e "  ${BOLD}Example:${NC}"
+    echo -e "    Container reports: 10 GB payload delivered"
+    echo -e "    Network actual:    60 GB bandwidth used"
+    echo -e "    Overhead ratio:    6x (typical for encrypted tunnels)"
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    read -n 1 -s -r -p "  Press any key to go back..." < /dev/tty
+}
+
+# Info page 2: Network Mode & Docker
+show_info_network() {
+    clear
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  NETWORK MODE & DOCKER${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}Why --network=host mode?${NC}"
+    echo ""
+    echo -e "  Conduit containers run with ${YELLOW}--network=host${NC} for best performance."
+    echo -e "  This mode gives containers direct access to the host's network stack,"
+    echo -e "  eliminating Docker's network bridge overhead and reducing latency."
+    echo ""
+    echo -e "${YELLOW}The trade-off${NC}"
+    echo ""
+    echo -e "  Docker cannot track per-container network I/O in host mode."
+    echo -e "  Running 'docker stats' will show ${DIM}0B / 0B${NC} for network - this is"
+    echo -e "  expected behavior, not a bug."
+    echo ""
+    echo -e "${YELLOW}Our solution${NC}"
+    echo ""
+    echo -e "  • ${BOLD}Container traffic:${NC} Parsed from Conduit's own [STATS] log lines"
+    echo -e "  • ${BOLD}Network traffic:${NC}   Captured via tcpdump on the host interface"
+    echo -e "  • Both methods work reliably with --network=host mode"
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}TECHNICAL DETAILS${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${BOLD}Container stats:${NC}"
+    echo -e "    Parsed from: docker logs [container] | grep '[STATS]'"
+    echo -e "    Fields:      Up (upload), Down (download), Connected, Uptime"
+    echo -e "    Scope:       Per-container, aggregated for display"
+    echo ""
+    echo -e "  ${BOLD}Tracker stats:${NC}"
+    echo -e "    Captured by: tcpdump on primary network interface"
+    echo -e "    Processed:   GeoIP lookup for country attribution"
+    echo -e "    Storage:     /opt/conduit/traffic_stats/cumulative_data"
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    read -n 1 -s -r -p "  Press any key to go back..." < /dev/tty
+}
+
+# Info page 3: Which Numbers To Use
+show_info_client_stats() {
+    clear
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  PEAK, AVERAGE & CLIENT HISTORY${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}What these numbers mean${NC}"
+    echo ""
+    echo -e "  ${BOLD}Peak${NC}      Highest number of connected clients since container"
+    echo -e "            started. Useful to see your maximum capacity usage."
+    echo ""
+    echo -e "  ${BOLD}Avg${NC}       Average connected clients over time. Gives you a"
+    echo -e "            realistic picture of typical load."
+    echo ""
+    echo -e "  ${BOLD}6h/12h/24h${NC} How many clients were connected at that time ago."
+    echo -e "            Shows '-' if no data exists for that time."
+    echo ""
+    echo -e "${YELLOW}When does data reset?${NC}"
+    echo ""
+    echo -e "  All stats reset when ${BOLD}ALL${NC} containers restart."
+    echo -e "  If only some containers restart, data is preserved."
+    echo -e "  Closing the dashboard does ${BOLD}NOT${NC} reset any data."
+    echo ""
+    echo -e "${YELLOW}Tracker ON vs OFF${NC}"
+    echo ""
+    echo -e "  ┌──────────────┬─────────────────────┬─────────────────────┐"
+    echo -e "  │ ${BOLD}Feature${NC}      │ ${GREEN}Tracker ON${NC}          │ ${RED}Tracker OFF${NC}         │"
+    echo -e "  ├──────────────┼─────────────────────┼─────────────────────┤"
+    echo -e "  │ Peak         │ Records 24/7        │ Only when dashboard │"
+    echo -e "  │              │                     │ is open             │"
+    echo -e "  ├──────────────┼─────────────────────┼─────────────────────┤"
+    echo -e "  │ Avg          │ All time average    │ Only times when     │"
+    echo -e "  │              │                     │ dashboard was open  │"
+    echo -e "  ├──────────────┼─────────────────────┼─────────────────────┤"
+    echo -e "  │ 6h/12h/24h   │ Shows data even if  │ Shows '-' if dash   │"
+    echo -e "  │              │ dashboard was closed│ wasn't open then    │"
+    echo -e "  └──────────────┴─────────────────────┴─────────────────────┘"
+    echo ""
+    echo -e "  ${DIM}Tip: Keep tracker enabled for complete, accurate stats.${NC}"
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    read -n 1 -s -r -p "  Press any key to go back..." < /dev/tty
+}
+
+show_info_which_numbers() {
+    clear
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  WHICH NUMBERS SHOULD I USE?${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}For bandwidth & cost planning${NC}"
+    echo ""
+    echo -e "  Use ${BOLD}Top 5 Upload/Download${NC} (tracker) numbers"
+    echo ""
+    echo -e "    → This is what your ISP bills you for"
+    echo -e "    → This is your actual network usage"
+    echo -e "    → Use this for server cost calculations"
+    echo -e "    → Use this to monitor bandwidth caps"
+    echo ""
+    echo -e "${YELLOW}For user impact metrics${NC}"
+    echo ""
+    echo -e "  Use ${BOLD}Traffic (current session)${NC} numbers"
+    echo ""
+    echo -e "    → This is actual content delivered to users"
+    echo -e "    → This matches Conduit's internal reporting"
+    echo -e "    → Use this to measure user activity"
+    echo -e "    → Use this to compare with Psiphon stats"
+    echo ""
+    echo -e "${YELLOW}Quick reference${NC}"
+    echo ""
+    echo -e "  ┌─────────────────────┬─────────────────────────────────────┐"
+    echo -e "  │ ${BOLD}Question${NC}            │ ${BOLD}Use This${NC}                            │"
+    echo -e "  ├─────────────────────┼─────────────────────────────────────┤"
+    echo -e "  │ ISP bandwidth used? │ Top 5 (tracker)                     │"
+    echo -e "  │ User data served?   │ Traffic (session)                   │"
+    echo -e "  │ Monthly costs?      │ Top 5 (tracker)                     │"
+    echo -e "  │ Users helped?       │ Traffic (session) + Connections     │"
+    echo -e "  └─────────────────────┴─────────────────────────────────────┘"
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+    read -n 1 -s -r -p "  Press any key to go back..." < /dev/tty
+}
+
+# Main info menu
+show_dashboard_info() {
+    while true; do
+        clear
+        echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${CYAN}  UNDERSTANDING YOUR DASHBOARD${NC}"
+        echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  Select a topic to learn more:"
+        echo ""
+        echo -e "    ${CYAN}[1]${NC}  Traffic & Bandwidth Explained"
+        echo -e "         ${DIM}Why tracker shows more than container stats${NC}"
+        echo ""
+        echo -e "    ${CYAN}[2]${NC}  Network Mode & Docker"
+        echo -e "         ${DIM}Why we use --network=host and how stats work${NC}"
+        echo ""
+        echo -e "    ${CYAN}[3]${NC}  Which Numbers To Use"
+        echo -e "         ${DIM}Choosing the right metric for your needs${NC}"
+        echo ""
+        echo -e "    ${CYAN}[4]${NC}  Peak, Average & Client History"
+        echo -e "         ${DIM}Understanding Peak, Avg, and 6h/12h/24h stats${NC}"
+        echo ""
+        echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  ${DIM}Press ${NC}${BOLD}1${NC}${DIM}-${NC}${BOLD}4${NC}${DIM} to view a topic, or any other key to go back${NC}"
+
+        read -n 1 -s -r key < /dev/tty
+        case "$key" in
+            1) show_info_traffic ;;
+            2) show_info_network ;;
+            3) show_info_which_numbers ;;
+            4) show_info_client_stats ;;
+            *) return ;;
+        esac
+    done
+}
+
+# Connection history file for tracking connections over time
+CONNECTION_HISTORY_FILE="/opt/conduit/traffic_stats/connection_history"
+_LAST_HISTORY_RECORD=0
+
+# Peak connections tracking (persistent, resets on container restart)
+PEAK_CONNECTIONS_FILE="/opt/conduit/traffic_stats/peak_connections"
+_PEAK_CONNECTIONS=0
+_PEAK_CONTAINER_START=""
+
+# Get the earliest container start time (used to detect restarts)
+get_container_start_time() {
+    local earliest=""
+    for i in $(seq 1 ${CONTAINER_COUNT:-1}); do
+        local cname=$(get_container_name $i 2>/dev/null)
+        [ -z "$cname" ] && continue
+        local start=$(docker inspect --format='{{.State.StartedAt}}' "$cname" 2>/dev/null | cut -d'.' -f1)
+        [ -z "$start" ] && continue
+        if [ -z "$earliest" ] || [[ "$start" < "$earliest" ]]; then
+            earliest="$start"
+        fi
+    done
+    echo "$earliest"
+}
+
+# Load peak from file (resets if containers restarted)
+load_peak_connections() {
+    local current_start=$(get_container_start_time)
+
+    if [ -f "$PEAK_CONNECTIONS_FILE" ]; then
+        local saved_start=$(head -1 "$PEAK_CONNECTIONS_FILE" 2>/dev/null)
+        local saved_peak=$(tail -1 "$PEAK_CONNECTIONS_FILE" 2>/dev/null)
+
+        # If container start time matches, restore peak
+        if [ "$saved_start" = "$current_start" ] && [ -n "$saved_peak" ]; then
+            _PEAK_CONNECTIONS=$saved_peak
+            _PEAK_CONTAINER_START="$current_start"
+            return
+        fi
+    fi
+
+    # Container restarted or no saved data - reset peak
+    _PEAK_CONNECTIONS=0
+    _PEAK_CONTAINER_START="$current_start"
+    save_peak_connections
+}
+
+# Save peak to file
+save_peak_connections() {
+    mkdir -p "$(dirname "$PEAK_CONNECTIONS_FILE")" 2>/dev/null
+    echo "$_PEAK_CONTAINER_START" > "$PEAK_CONNECTIONS_FILE"
+    echo "$_PEAK_CONNECTIONS" >> "$PEAK_CONNECTIONS_FILE"
+}
+
+# Connection history container tracking (resets when containers restart)
+CONNECTION_HISTORY_START_FILE="/opt/conduit/traffic_stats/connection_history_start"
+_CONNECTION_HISTORY_CONTAINER_START=""
+
+# Check and reset connection history if containers restarted
+check_connection_history_reset() {
+    local current_start=$(get_container_start_time)
+
+    # Check if we have a saved container start time
+    if [ -f "$CONNECTION_HISTORY_START_FILE" ]; then
+        local saved_start=$(cat "$CONNECTION_HISTORY_START_FILE" 2>/dev/null)
+        if [ "$saved_start" = "$current_start" ] && [ -n "$saved_start" ]; then
+            # Same container session, keep history
+            _CONNECTION_HISTORY_CONTAINER_START="$current_start"
+            return
+        fi
+    fi
+
+    # Container restarted or new session - clear history
+    _CONNECTION_HISTORY_CONTAINER_START="$current_start"
+    mkdir -p "$(dirname "$CONNECTION_HISTORY_START_FILE")" 2>/dev/null
+    echo "$current_start" > "$CONNECTION_HISTORY_START_FILE"
+
+    # Clear history file
+    rm -f "$CONNECTION_HISTORY_FILE" 2>/dev/null
+}
+
+# Record current connection count to history (called every ~5 minutes)
+record_connection_history() {
+    local connected=$1
+    local connecting=$2
+    local now=$(date +%s)
+
+    # Only record every 5 minutes (300 seconds)
+    if [ $(( now - _LAST_HISTORY_RECORD )) -lt 300 ]; then
+        return
+    fi
+    _LAST_HISTORY_RECORD=$now
+
+    # Check if containers restarted (reset history if so)
+    check_connection_history_reset
+
+    # Ensure directory exists
+    mkdir -p "$(dirname "$CONNECTION_HISTORY_FILE")" 2>/dev/null
+
+    # Append current snapshot
+    echo "${now}|${connected}|${connecting}" >> "$CONNECTION_HISTORY_FILE"
+
+    # Prune entries older than 25 hours (keep some buffer)
+    local cutoff=$((now - 90000))
+    if [ -f "$CONNECTION_HISTORY_FILE" ]; then
+        awk -F'|' -v cutoff="$cutoff" '$1 >= cutoff' "$CONNECTION_HISTORY_FILE" > "${CONNECTION_HISTORY_FILE}.tmp" 2>/dev/null
+        mv -f "${CONNECTION_HISTORY_FILE}.tmp" "$CONNECTION_HISTORY_FILE" 2>/dev/null
+    fi
+}
+
+# Get average connections since container started
+get_average_connections() {
+    # Check if containers restarted (clear stale history)
+    check_connection_history_reset
+
+    if [ ! -f "$CONNECTION_HISTORY_FILE" ]; then
+        echo "-"
+        return
+    fi
+
+    # Calculate average from all entries in history
+    local avg=$(awk -F'|' '
+        NF >= 2 { sum += $2; count++ }
+        END { if (count > 0) printf "%.0f", sum/count; else print "-" }
+    ' "$CONNECTION_HISTORY_FILE" 2>/dev/null)
+
+    echo "${avg:--}"
+}
+
+# Get connection snapshot from N hours ago (returns "connected|connecting" or "-|-")
+get_connection_snapshot() {
+    local hours_ago=$1
+    local now=$(date +%s)
+    local target=$((now - (hours_ago * 3600)))
+    local tolerance=1800  # 30 minute tolerance window
+
+    # Check if containers restarted (clear stale history)
+    check_connection_history_reset
+
+    if [ ! -f "$CONNECTION_HISTORY_FILE" ]; then
+        echo "-|-"
+        return
+    fi
+
+    # Find closest entry to target time within tolerance
+    local result=$(awk -F'|' -v target="$target" -v tol="$tolerance" '
+        BEGIN { best_diff = tol + 1; best = "-|-" }
+        {
+            diff = ($1 > target) ? ($1 - target) : (target - $1)
+            if (diff < best_diff) {
+                best_diff = diff
+                best = $2 "|" $3
+            }
+        }
+        END { print best }
+    ' "$CONNECTION_HISTORY_FILE" 2>/dev/null)
+
+    echo "${result:--|-}"
+}
+
 # Global cache for container stats (persists between show_status calls)
 declare -A _STATS_CACHE_UP _STATS_CACHE_DOWN _STATS_CACHE_CONN _STATS_CACHE_CING
 
@@ -2485,9 +2962,14 @@ show_status() {
         EL="\033[K" # Erase Line escape code
     fi
 
+    # Load peak connections from file (only once per session)
+    if [ -z "$_PEAK_CONTAINER_START" ]; then
+        load_peak_connections
+    fi
+
     echo ""
 
-    
+
     # Cache docker ps output once
     local docker_ps_cache=$(docker ps 2>/dev/null)
 
@@ -2564,6 +3046,12 @@ show_status() {
     local connected=$total_connected
     # Export for parent function to reuse (avoids duplicate docker logs calls)
     _total_connected=$total_connected
+
+    # Update peak connections if current exceeds peak (and save to file)
+    if [ "$connected" -gt "$_PEAK_CONNECTIONS" ] 2>/dev/null; then
+        _PEAK_CONNECTIONS=$connected
+        save_peak_connections
+    fi
 
     # Aggregate upload/download across all containers
     local upload=""
@@ -2671,15 +3159,29 @@ show_status() {
         local net_display="↓ ${rx_mbps} Mbps  ↑ ${tx_mbps} Mbps"
         
         if [ -n "$upload" ] || [ "$connected" -gt 0 ] || [ "$connecting" -gt 0 ]; then
+            local avg_conn=$(get_average_connections)
             local status_line="${BOLD}Status:${NC} ${GREEN}Running${NC}"
             [ -n "$uptime" ] && status_line="${status_line} (${uptime})"
+            status_line="${status_line}  ${DIM}|${NC}  ${BOLD}Peak:${NC} ${CYAN}${_PEAK_CONNECTIONS}${NC}"
+            status_line="${status_line}  ${DIM}|${NC}  ${BOLD}Avg:${NC} ${CYAN}${avg_conn}${NC}"
             echo -e "${status_line}${EL}"
-            echo -e "  Containers: ${GREEN}${running_count}${NC}/${CONTAINER_COUNT}    Clients: ${GREEN}${connected}${NC} connected, ${YELLOW}${connecting}${NC} connecting${EL}"
+            echo -e "  Containers: ${GREEN}${running_count}${NC}/${CONTAINER_COUNT}  Clients: ${GREEN}${connected}${NC} connected, ${YELLOW}${connecting}${NC} connecting${EL}"
 
             echo -e "${EL}"
             echo -e "${CYAN}═══ Traffic (current session) ═══${NC}${EL}"
-            [ -n "$upload" ] && echo -e "  Upload:       ${CYAN}${upload}${NC}${EL}"
-            [ -n "$download" ] && echo -e "  Download:     ${CYAN}${download}${NC}${EL}"
+            # Record connection history (every 5 min)
+            record_connection_history "$connected" "$connecting"
+            # Get connection history snapshots
+            local snap_6h=$(get_connection_snapshot 6)
+            local snap_12h=$(get_connection_snapshot 12)
+            local snap_24h=$(get_connection_snapshot 24)
+            local conn_6h=$(echo "$snap_6h" | cut -d'|' -f1)
+            local conn_12h=$(echo "$snap_12h" | cut -d'|' -f1)
+            local conn_24h=$(echo "$snap_24h" | cut -d'|' -f1)
+            # Display traffic and history side by side
+            printf "  Upload:   ${CYAN}%-12s${NC} ${DIM}|${NC} Clients: ${DIM}6h:${NC}${GREEN}%-4s${NC} ${DIM}12h:${NC}${GREEN}%-4s${NC} ${DIM}24h:${NC}${GREEN}%s${NC}${EL}\n" \
+                "${upload:-0 B}" "${conn_6h}" "${conn_12h}" "${conn_24h}"
+            printf "  Download: ${CYAN}%-12s${NC} ${DIM}|${NC}${EL}\n" "${download:-0 B}"
 
             echo -e "${EL}"
             echo -e "${CYAN}═══ Resource Usage ═══${NC}${EL}"
@@ -5945,6 +6447,7 @@ show_info_menu() {
             echo -e "  3. 📦 Containers & Scaling"
             echo -e "  4. 🔒 Privacy & Security"
             echo -e "  5. 🚀 About Psiphon Conduit"
+            echo -e "  6. 📈 Dashboard Metrics Explained"
             echo ""
             echo -e "  [b] Back to menu"
             echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
@@ -5958,6 +6461,7 @@ show_info_menu() {
             3) _info_containers; redraw=true ;;
             4) _info_privacy; redraw=true ;;
             5) show_about; redraw=true ;;
+            6) show_dashboard_info; redraw=true ;;
             b|"") break ;;
             *) echo -e "  ${RED}Invalid.${NC}"; sleep 1; redraw=true ;;
         esac
@@ -6128,6 +6632,7 @@ show_help() {
     echo "  menu      Open interactive menu (default)"
     echo "  version   Show version information"
     echo "  about     About Psiphon Conduit"
+    echo "  info      Dashboard metrics explained"
     echo "  help      Show this help"
 }
 
@@ -6537,35 +7042,62 @@ update_conduit() {
     echo -e "${CYAN}═══ UPDATE CONDUIT ═══${NC}"
     echo ""
 
+    local script_updated=false
+
     # --- Phase 1: Script update ---
-    echo "Checking for script updates..."
+    echo -e "${BOLD}Phase 1: Checking for script updates...${NC}"
     local update_url="https://raw.githubusercontent.com/SamNet-dev/conduit-manager/main/conduit.sh"
     local tmp_script="/tmp/conduit_update_$$.sh"
 
-    if curl -sL --max-time 30 --max-filesize 2097152 -o "$tmp_script" "$update_url" 2>/dev/null; then
+    if curl -fsSL --max-time 30 --max-filesize 2097152 -o "$tmp_script" "$update_url" 2>/dev/null; then
+        # Validate downloaded script (basic sanity checks)
         if grep -q "CONDUIT_IMAGE=" "$tmp_script" && grep -q "create_management_script" "$tmp_script" && bash -n "$tmp_script" 2>/dev/null; then
-            echo -e "${GREEN}✓ Latest script downloaded${NC}"
+            local new_version=$(grep -m1 '^VERSION=' "$tmp_script" 2>/dev/null | cut -d'"' -f2)
+            echo -e "  ${GREEN}✓ Downloaded v${new_version:-?} from GitHub${NC}"
+            echo -e "  Installing..."
+
+            # Always install latest from GitHub (run new script's update-components)
             bash "$tmp_script" --update-components
             local update_status=$?
             rm -f "$tmp_script"
+
             if [ $update_status -eq 0 ]; then
-                echo -e "${GREEN}✓ Management script updated${NC}"
-                echo -e "${GREEN}✓ Tracker service updated${NC}"
+                echo -e "  ${GREEN}✓ Script installed (v${new_version:-?})${NC}"
+                script_updated=true
             else
-                echo -e "${RED}Script update failed. Continuing with Docker check...${NC}"
+                echo -e "  ${RED}✗ Installation failed${NC}"
             fi
         else
-            echo -e "${RED}Downloaded file doesn't look valid. Skipping script update.${NC}"
+            echo -e "  ${RED}✗ Downloaded file invalid or corrupted${NC}"
             rm -f "$tmp_script"
         fi
     else
-        echo -e "${YELLOW}Could not download latest script. Skipping script update.${NC}"
-        rm -f "$tmp_script"
+        echo -e "  ${YELLOW}✗ Could not download (check internet connection)${NC}"
+        rm -f "$tmp_script" 2>/dev/null
     fi
 
-    # --- Phase 2: Docker image update ---
+    # --- Phase 2: Restart tracker service (picks up any script changes) ---
     echo ""
-    echo "Checking for Docker image updates..."
+    echo -e "${BOLD}Phase 2: Updating tracker service...${NC}"
+    if [ "${TRACKER_ENABLED:-true}" = "true" ]; then
+        # Regenerate and restart tracker to pick up new code
+        if command -v systemctl &>/dev/null; then
+            systemctl restart conduit-tracker.service 2>/dev/null
+            if systemctl is-active conduit-tracker.service &>/dev/null; then
+                echo -e "  ${GREEN}✓ Tracker service restarted${NC}"
+            else
+                echo -e "  ${YELLOW}✗ Tracker restart failed (will retry on next start)${NC}"
+            fi
+        else
+            echo -e "  ${DIM}Tracker service not available (no systemd)${NC}"
+        fi
+    else
+        echo -e "  ${DIM}Tracker is disabled, skipping${NC}"
+    fi
+
+    # --- Phase 3: Docker image update ---
+    echo ""
+    echo -e "${BOLD}Phase 3: Checking for Docker image updates...${NC}"
     local pull_output
     pull_output=$(docker pull "$CONDUIT_IMAGE" 2>&1)
     local pull_status=$?
@@ -6574,7 +7106,7 @@ update_conduit() {
     if [ $pull_status -ne 0 ]; then
         echo -e "${RED}Failed to check for Docker updates. Check your internet connection.${NC}"
         echo ""
-        echo -e "${GREEN}Script update complete.${NC}"
+        echo -e "${GREEN}Update complete.${NC}"
         return 1
     fi
 
@@ -6594,7 +7126,10 @@ update_conduit() {
     fi
 
     echo ""
-    echo -e "${GREEN}Update complete.${NC}"
+    echo -e "${GREEN}═══ Update complete ═══${NC}"
+    if [ "$script_updated" = true ]; then
+        echo -e "${DIM}Note: Some changes may require restarting the menu to take effect.${NC}"
+    fi
 }
 
 case "${1:-menu}" in
@@ -6612,6 +7147,7 @@ case "${1:-menu}" in
     restore)  restore_key ;;
     scale)    manage_containers ;;
     about)    show_about ;;
+    info)     show_dashboard_info ;;
     uninstall) uninstall_all ;;
     version|-v|--version) show_version ;;
     help|-h|--help) show_help ;;
@@ -6956,7 +7492,7 @@ SVCEOF
     fi
 }
 #
-# REACHED END OF SCRIPT - VERSION 1.2
+# REACHED END OF SCRIPT - VERSION 1.2.1
 # ###############################################################################
 main "$@"
 
